@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -63,42 +64,46 @@ public class Server {
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
              BufferedOutputStream out = new BufferedOutputStream(socket.getOutputStream())) {
 
-            // Читаем только первую строку запроса для простоты
             String requestLine = in.readLine();
             if (requestLine == null || requestLine.isEmpty()) {
                 return;
             }
 
-            processRequest(requestLine, out);
+            try {
+                Request request = new Request(requestLine);
+                System.out.println("Processing: " + request); // Для отладки
+                processRequest(request, out);
+            } catch (IllegalArgumentException e) {
+                sendErrorResponse(out, 400, "Bad Request: " + e.getMessage());
+            }
 
         } catch (IOException e) {
             System.err.println("Error handling client connection: " + e.getMessage());
         }
     }
 
-    private void processRequest(String requestLine, BufferedOutputStream out) throws IOException {
-        String[] parts = requestLine.split(" ");
-
-        if (parts.length != 3) {
-            sendErrorResponse(out, 400, "Bad Request");
-            return;
-        }
-
-        String method = parts[0];
-        String path = parts[1];
-        String protocol = parts[2];
-
+    private void processRequest(Request request, BufferedOutputStream out) throws IOException {
         // Поддерживаем только GET запросы
-        if (!"GET".equals(method)) {
+        if (!"GET".equals(request.getMethod())) {
             sendErrorResponse(out, 405, "Method Not Allowed");
             return;
         }
 
+        String path = request.getPath();
+
+        // Проверяем валидность пути
         if (!VALID_PATHS.contains(path)) {
             sendErrorResponse(out, 404, "Not Found");
             return;
         }
 
+        // Обработка динамических эндпоинтов
+        if (path.equals("/greeting")) {
+            handleGreetingEndpoint(request, out);
+            return;
+        }
+
+        // Обработка статических файлов
         Path filePath = Path.of(".", "public", path);
         if (!Files.exists(filePath)) {
             sendErrorResponse(out, 404, "Not Found");
@@ -106,6 +111,57 @@ public class Server {
         }
 
         sendFileResponse(out, filePath, path);
+    }
+    private void handleGreetingEndpoint(Request request, BufferedOutputStream out) throws IOException {
+        // Получаем параметры из query string
+        String name = request.getQueryParam("name");
+        String language = request.getQueryParam("lang");
+
+        if (name == null) {
+            name = "Guest";
+        }
+
+        String greeting;
+        if ("ru".equals(language)) {
+            greeting = "Привет, " + name + "!";
+        } else if ("es".equals(language)) {
+            greeting = "¡Hola, " + name + "!";
+        } else {
+            greeting = "Hello, " + name + "!";
+        }
+
+        // Получаем все параметры для демонстрации
+        Map<String, String> allParams = request.getQueryParams();
+
+        // Формируем HTML ответ
+        String html = String.format(
+                "<!DOCTYPE html>" +
+                        "<html>" +
+                        "<head><title>Greeting</title></head>" +
+                        "<body>" +
+                        "<h1>%s</h1>" +
+                        "<h2>All query parameters:</h2>" +
+                        "<ul>%s</ul>" +
+                        "<p><a href='/index.html'>Back to home</a></p>" +
+                        "</body>" +
+                        "</html>",
+                greeting,
+                formatParamsAsHtml(allParams)
+        );
+
+        byte[] contentBytes = html.getBytes();
+        writeResponseHeaders(out, 200, "text/html", contentBytes.length);
+        out.write(contentBytes);
+        out.flush();
+    }
+
+    private String formatParamsAsHtml(Map<String, String> params) {
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            sb.append(String.format("<li><b>%s</b>: %s</li>",
+                    entry.getKey(), entry.getValue()));
+        }
+        return sb.toString();
     }
 
     private void sendFileResponse(BufferedOutputStream out, Path filePath, String originalPath) throws IOException {
