@@ -54,14 +54,6 @@ public class Request {
         return path;
     }
 
-    public String getRawPath() {
-        return rawPath;
-    }
-
-    public String getProtocol() {
-        return protocol;
-    }
-
     public String getQueryParam(String name) {
         return queryParams.get(name);
     }
